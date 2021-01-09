@@ -1,0 +1,297 @@
+---
+title: "Informe 5"
+author: "Carmen Lebrero Cia"
+date: "5/11/2020"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_depth: 4
+  pdf_document: 
+    toc: yes
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+if (!requireNamespace("BiocManager", quietly=TRUE))
+    install.packages("BiocManager")
+BiocManager::install("TCGAbiolinks")
+library(TCGAbiolinks)
+library(dplyr)
+library(SummarizedExperiment)
+library(DT)
+```
+
+```{r include=FALSE}
+library(htmlTable)
+library(prettydoc)
+library(knitr)
+```
+
+```{r include=FALSE}
+setwd("D:/datos")
+query1 <- GDCquery(project = "TCGA-KIRC",
+                  data.category = "Protein expression",
+                  legacy = TRUE)
+GDCdownload(query1)
+ExprProtKIRC <- GDCprepare(query1)
+setwd("D:/datos")
+query1 <- GDCquery(project = "TCGA-KIRC",
+                  data.category = "Protein expression",
+                  legacy = TRUE)
+GDCdownload(query1)
+ExprProtKIRC <- GDCprepare(query1)
+
+query5C <- GDCquery(project = "TCGA-KIRC",
+                  data.category = "Gene expression",
+                  data.type = "Gene expression quantification",
+                  experimental.strategy = "RNA-Seq",
+                  file.type = "results",
+                  legacy = TRUE)
+GDCdownload(query5C)
+ExpGenKIRC3 <- GDCprepare(query5C)
+
+
+setwd("D:/datos")
+query8B <- GDCquery(project = "TCGA-KIRC",
+                  data.category = "Clinical", data.type = "Clinical Supplement",
+                  legacy = TRUE)
+GDCdownload(query8B)
+ClinicKIRC2 <- GDCprepare_clinic(query8B, clinical.info = "patient")
+```
+
+
+# Archivos de datos clínicos
+
+Si utilizamos la función ```str()``` sobre ```ClinicKIRC2``` (datos clínicos de TCGA-KIRC) observamos que se trata de un archivo Dataframe con 537 observaciones y 66 variables.
+
+```{r}
+str(ClinicKIRC2)
+```
+
+De entre todas las variables las más interesantes parecen ser ```bcr_patient_barcode```, ```vital_status``` o ```stage_event_pathologic_stage```. Vamos a encontrar los índices de cada variable en el dataframe y podemos hacer un dataframe más pequeño.
+
+```{r}
+grep("bcr_patient_barcode", colnames(ClinicKIRC2))
+grep("vital_status", colnames(ClinicKIRC2))
+grep("stage_event_pathologic_stage", colnames(ClinicKIRC2))
+```
+
+```{r}
+ClinicS <- ClinicKIRC2[,c(1,7,59)]
+head(ClinicS)
+```
+
+Vamos a ver si existen missing values con ```is.na()```.
+
+```{r}
+sum(is.na(ClinicS))
+```
+
+Observamos que no tenemos ningún NA en este Dataset, por lo que tenemos datos de nuestra variable de interés para los 537 pacientes del estudio TCGA-KIRC.
+
+Podemos sacar más información a partir de estas variables. Por ejemplo, podemos observar con una gráfica según la variable de estadío patológico que la mayoría de nuestras pertenecen al estadío I, seguido de las muestras en el estadío III, IV, II y 0.
+
+```{r}
+plot(ClinicKIRC2$stage_event_pathologic_stage)
+```
+
+Podemos obtener el número exacto de pacientes con la función ```summmary()```.
+
+```{r}
+summary(ClinicKIRC2$stage_event_pathologic_stage)
+```
+
+Esta clasificación por estadíos se refiere a lo siguiente a un método de agrupación de los pacientes según una serie de características de los tumores como la localización y el tamaño del tumor (T), si se observan ganglios linfáticos cerca (N) o si hay metástasis (M).
+
+* **Estadío 0**. Describe cáncer "in situ" que están localizados en el lugar de origen y no se han esparcido a tejidos cercanos. Son tumores fácilmente curables que se pueden quitar con una cirugía.
+
+* **Estadío 1**. Se trata de un tumor pequeño que no se ha extendido de forma muy profunda a tejidos colindantes ni a los ganglios linfáticos. A veces se le denomina cáncer temprano.
+
+* **Estadíos II y III**. Estos dos estadíos indican tumores más grandes que se han extendido de forma más profunda a tejidos y que pueden haber llegado a los ganglios linfáticos pero no a otros órganos.
+
+* **Estadío IV**. Este estadío significa que el cáncer se ha extendido a otros órganos. También conocido como cáncer metastásico avanzado.
+
+También podemos obtener información acerca de los fallecimientos de nuestra muestra. Y observamos que 372 siguen vivos y 162 han fallecido. Volvemos  a ver 3 muestras que no están catalogadas en ninguno de estos dos grupos, debemos ver si esas muestras, aunque hayamos hecho anteriormente la búsqueda de missing values, no contienen información.
+
+
+```{r}
+plot(ClinicKIRC2$vital_status)
+```
+
+```{r}
+summary(ClinicKIRC2$vital_status)
+```
+
+Otro análisis interesante sería saber cuántos fallecidos hay según el estadío del tumor.
+
+```{r}
+plot(vital_status ~ stage_event_pathologic_stage, data = ClinicKIRC2)
+```
+
+**Fase I (n=269)**
+
+Fallecidos
+
+```{r}
+length(subset(ClinicKIRC2$patient_id , ClinicKIRC2$vital_status == "Dead" & ClinicKIRC2$stage_event_pathologic_stage == "Stage I"))
+```
+
+Vivos
+
+
+```{r}
+length(subset(ClinicKIRC2$patient_id , ClinicKIRC2$vital_status == "Alive" & ClinicKIRC2$stage_event_pathologic_stage == "Stage I"))
+
+```
+
+**Fase II (n=57)**
+
+Fallecidos
+
+```{r}
+length(subset(ClinicKIRC2$patient_id , ClinicKIRC2$vital_status == "Dead" & ClinicKIRC2$stage_event_pathologic_stage == "Stage II"))
+```
+
+Vivos
+
+
+```{r}
+length(subset(ClinicKIRC2$patient_id , ClinicKIRC2$vital_status == "Alive" & ClinicKIRC2$stage_event_pathologic_stage == "Stage II"))
+
+```
+
+**Fase III (n=125)**
+
+Fallecidos
+
+```{r}
+length(subset(ClinicKIRC2$patient_id , ClinicKIRC2$vital_status == "Dead" & ClinicKIRC2$stage_event_pathologic_stage == "Stage III"))
+```
+
+Vivos
+
+
+```{r}
+length(subset(ClinicKIRC2$patient_id , ClinicKIRC2$vital_status == "Alive" & ClinicKIRC2$stage_event_pathologic_stage == "Stage III"))
+
+```
+
+**Fase IV (n=83)**
+
+Fallecidos
+
+```{r}
+length(subset(ClinicKIRC2$patient_id , ClinicKIRC2$vital_status == "Dead" & ClinicKIRC2$stage_event_pathologic_stage == "Stage IV"))
+```
+
+Vivos
+
+
+```{r}
+length(subset(ClinicKIRC2$patient_id , ClinicKIRC2$vital_status == "Alive" & ClinicKIRC2$stage_event_pathologic_stage == "Stage IV"))
+
+```
+
+Vamos a buscar esos pacientes que no tienen vital_status asignado:
+
+```{r}
+subset(ClinicKIRC2$bcr_patient_barcode , ClinicKIRC2$vital_status != "Dead" & ClinicKIRC2$vital_status != "Alive")
+```
+
+Y ver si estos tres son los mismos que no tienen asignada la fase del tumor:
+
+```{r}
+subset(ClinicKIRC2$bcr_patient_barcode , ClinicKIRC2$stage_event_pathologic_stage != "Stage I" & ClinicKIRC2$stage_event_pathologic_stage != "Stage II" & ClinicKIRC2$stage_event_pathologic_stage != "Stage III" & ClinicKIRC2$stage_event_pathologic_stage != "Stage IV")
+```
+
+No son los mismos pacientes los que no tienen etiqueta para vital_status y para la Fase del cancer. Creamos dos Datasets. ```ClinicSVital``` sin los tres pacientes que no tienen etiqueta para Vital_status y ```ClinicSStage``` sin los pacientes que no tienen etiqueta para Stage. Además se crearán dos cadenas de caracteres con los barcodes de cada Dataframe.
+
+```{r}
+ClinicSVital <- subset(ClinicS, ClinicS$bcr_patient_barcode != "TCGA-BP-4326" & ClinicS$bcr_patient_barcode != "TCGA-BP-4329" & ClinicS$bcr_patient_barcode != "TCGA-BP-4334")
+```
+
+```{r}
+ClinicSStage <- subset(ClinicS, ClinicS$bcr_patient_barcode != "TCGA-B4-5838" & ClinicS$bcr_patient_barcode != "TCGA-BP-4798" & ClinicS$bcr_patient_barcode != "TCGA-MM-A563")
+```
+
+Si elegimos como variable a modelar ```vital_status```se tratará de un problema de clasificaicón binaria. Mientras que si elegimos el estadío del tumor, sería un problema de clasificación multiclase.
+
+# Datos de Expresión Génica
+
+Vamos a explorar nuestros datos de Expresión Génica ```ExpGenKIRC3```. Observamos que se trata de un archivo ```RangedSummarizedExperiment```, para tratar este tipo de archivos podemos seguir la siguiente guía: https://www.bioconductor.org/packages/release/bioc/vignettes/SummarizedExperiment/inst/doc/SummarizedExperiment.html. 
+
+## Introducción
+
+La clase ```SummarizedExperiment``` se usa para llenar matrices rectangulares de resultados experimentales producidos normalmente en experimentos de secuenciación o microarrays. Cada objeto almacena observaciones de una o más muestras, junto con metadatos adicionales que describen obsevaciones (características) y muestras (fenotipos).
+
+Un aspecto clave de la clase ```SummarizedExperiment``` es la coordinación de los metadatos y los ensayos cuando se realizan subagrupaciones o subconjuntos. Por ejemplo, si quieres excluir una muestra se puede hacer en los metadatos y en los ensayos en una única operación, lo que asegura que los metadatos y los datos observados permanezcan sincronizados.
+
+## Anatomía de SummarizedExperiment
+
+El paquete ```SummarizedExperiment``` contiene dos clases: ```SummarizedExperiment``` y ```RangedSummarizedExperiment```.
+
+```SummarizedExperiment``` es un contenedor similar a una matriz donde las filas representan características de interés (por ejemplo: genes, transcritos, exones, etc.) y las columnas representan las muestras. Los objetos contienen uno o más ensayos, cada uno representado por un objeto matriz de número u otro modo. Las filas del objeto ```SummarizedExperiment``` representan características de interés. La información acerca de estas características está almacenada en un objeto Dataframe, accesible usando la función ```rowData()```. Cada fila del Dataframe aporta información de la característica en la fila correspondiente del objeto ```SummarizedExperiment```. Las columnas del Datafram representan diferentes atributos de las características de interés como IDs de genes o transcritos.
+
+```RangedSummarizedExperiment``` es el "hijo" de la clase ```SummarizedExperiment```, lo que significaa que todos los métodos de ```SummarizedExperiment```también funcionan sobre ```RangedSummarizedExperiment```.
+
+La diferencia fundamental entre las dos clases es que las filas de ```RangedSummarizedExperiment```representan rangos genómicos de interés en vez de un Dataframe de carcterísticas. Los rangos de ```RangedSummarizedExperiment```se describen en el objeto ```GRanges```o ```GRangesList```, accesible utilizando la función ```rowRanges()```.
+
+
+## Assays
+
+```{r}
+library(SummarizedExperiment)
+se <- ExpGenKIRC3
+se
+```
+
+Para recuperar los datos a partir del experimento a partir de un objeto ```SummarizedExperiment``` se puede utilizar ```assays()```. Un objeto puede tener múltiples dataset de ensayos a los que se puede acceder usando el operador ```$```. En nuestro caso tenemos dos datasets: ```raw_count``` y ```scaled_estimate```. Partiremos desde el archivo ```raw_count``` para realizar nuestro análisis.
+
+```{r}
+assays(se)$raw_count[1:3,1:4]
+```
+
+
+```{r}
+rowRanges(se)
+```
+
+## Columnas (datos de las muestras)
+
+Se puede acceder a los metadatos que describen las muestras usando ```colData()``, y es un Dataframe que puede almacenar cualquier número de columna.
+
+```{r echo=T, results='hide'}
+colData(se)
+```
+
+Se puede acceder a estos metadatos usando ```$```, lo que hace más sencillo sustraer un objeto entero dado un fenotipo. Por ejemplo, podemos extraer todas las muestras que tengan una etiqueta para el estado vital:
+
+```{r}
+se[, se$vital_status == "Dead" | se$vital_status == "Alive"]
+```
+
+En este Dataframe, a pesar de ser del proyecto TCGA-KIRC, hay 606 muestras, cuando en el de datos clínicos había 537. Parece que todas las muestras de datos de Expresión génica tienen su etiqueta de ```vital_status``` correspondiente. Encontramos 202 muertos y 404 vivos.
+
+Vamos a buscar Missing values para la etiqueta de Fase del tumor para lo cual utilizaremos el siguiente código:
+
+```{r}
+which(is.na(se$ajcc_pathologic_stage))
+se$patient[c(128,190,460)]
+```
+
+Los códigos de los pacientes que no tienen esta etiqueta disponible son los mismos que no la tenían para los datos clínicos, lo cual tiene sentido.
+
+## Preprocesado: Exploración, Control de Calidad y Normalización de datos TCGA
+
+Seguiremos el Pipeline mostrado en: https://bioconductor.org/packages/release/bioc/vignettes/TCGAbiolinks/inst/doc/analysis.html#TCGAanalyze:_Analyze_data_from_TCGA
+
+### Control de calidad
+
+https://bmcbioinformatics.biomedcentral.com/articles/10.1186/s12859-020-3399-8
+
+```{r}
+KIRCnaseq_CorOutliers <- TCGAanalyze_Preprocessing(ExpGenKIRC3)
+```

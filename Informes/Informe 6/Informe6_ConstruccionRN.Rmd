@@ -1,0 +1,575 @@
+---
+title: 'Informe 6: Construyendo modelos'
+author: "Carmen Lebrero Cia"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_depth: 3
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Construcción de modelo de Machine Learning supervisado con datos de expresión génica
+
+En este informe tenemos como objetivo construir un modelo de Machine Learning Supervisado utilizando los datos de Expresión génica transformados. Además utilizaremos la versión filtrada de estos datos por un lado, y la versión con únicamente los genes diferencialmente expresados por otro. 
+
+## Obtención y procesado de los datos
+
+### Instalación y puesta en marcha de los paquetes necesarios
+
+```{r, results='hide', message=FALSE}
+if (!requireNamespace("BiocManager", quietly=TRUE))
+    install.packages("BiocManager")
+BiocManager::install("TCGAbiolinks")
+library(TCGAbiolinks)
+library(dplyr)
+library(SummarizedExperiment)
+library(DT)
+```
+
+### Descarga de los datos y preparación de objetos R
+
+
+```{r results='hide', message=FALSE}
+setwd("D:/datos")
+
+QueryExpGenRSEM <- GDCquery(project = "TCGA-KIRC",
+                  data.category = "Gene expression",
+                  data.type = "Gene expression quantification",
+                  experimental.strategy = "RNA-Seq",
+                  file.type = "results",
+                  legacy = TRUE)
+GDCdownload(QueryExpGenRSEM)
+ExpGenTCGA_KIRC_RawData <- GDCprepare(QueryExpGenRSEM)
+```
+
+### Preprocesado
+
+```{r results='hide'}
+#subconjunto quedándonos con las filas con sumatorio de conteos mayores a 1 y guardado de este cambio en el objeto
+keep <- rowSums(assay(ExpGenTCGA_KIRC_RawData)) > 1
+ExpGenTCGA_KIRC_RawData <- ExpGenTCGA_KIRC_RawData[keep,]
+nrow(assay(ExpGenTCGA_KIRC_RawData))
+```
+### Normalización
+
+```{r results='hide', message=FALSE}
+#Downstream análisis usando datos de expresión génica de muestras dde TCGA de IlluminaHiSeq_RNASeqV2 com extensión rsem.results
+
+ExpGenTCGA_KIRC_Norm <- TCGAanalyze_Normalization(tabDF = ExpGenTCGA_KIRC_RawData, geneInfo =  geneInfo)
+```
+### Transformación log2
+
+```{r results='hide'}
+ExpGenTCGA_KIRC_Norm_Trans<- log2(ExpGenTCGA_KIRC_Norm+1)
+```
+
+```{r}
+ExpGenTCGA_KIRC_Norm_Trans[1:10,1:3]
+```
+## Obtención de los objetos de datos filtrados y DEGs
+
+### Filtrado
+
+```{r results='hide'}
+#quantile filter of genes
+dim(ExpGenTCGA_KIRC_Norm)
+ExpGenTCGA_KIRC_Norm_Filt75 <- TCGAanalyze_Filtering(tabDF = ExpGenTCGA_KIRC_Norm, method = "quantile", qnt.cut = 0.75)
+dim(ExpGenTCGA_KIRC_Norm_Filt75)
+```
+Pasamos de tener 19586 genes a 4897 genes.
+
+```{r results='hide'}
+#quantile filter of genes
+dim(ExpGenTCGA_KIRC_Norm_Trans)
+ExpGenTCGA_KIRC_Norm_Trans_Filt75 <- TCGAanalyze_Filtering(tabDF = ExpGenTCGA_KIRC_Norm_Trans, method = "quantile", qnt.cut = 0.75)
+dim(ExpGenTCGA_KIRC_Norm_Trans_Filt75)
+```
+
+### Análisis de expresión diferencial
+
+```{r results='hide'}
+ExpGenTCGA_KIRC_SampleName_DeadStatus <- subset(ExpGenTCGA_KIRC_RawData$barcode, ExpGenTCGA_KIRC_RawData$vital_status == "Dead")
+ExpGenTCGA_KIRC_SampleName_AliveStatus <- subset(ExpGenTCGA_KIRC_RawData$barcode, ExpGenTCGA_KIRC_RawData$vital_status == "Alive")
+```
+
+```{r results='hide', message=FALSE}
+# Diff.expr.analysis (DEA)
+ExpGenTCGA_KIRC_Norm_Filt75_DEGs <- TCGAanalyze_DEA(mat1 = ExpGenTCGA_KIRC_Norm_Filt75[,ExpGenTCGA_KIRC_SampleName_DeadStatus],
+                            mat2 = ExpGenTCGA_KIRC_Norm_Filt75[,ExpGenTCGA_KIRC_SampleName_AliveStatus],
+                            Cond1type = "Dead",
+                            Cond2type = "Alive",
+                            fdr.cut = 0.10,
+                            logFC.cut = 0.4,
+                            method = "glmLRT")
+```
+```{r results='hide', message=FALSE}
+# Diff.expr.analysis (DEA)
+ExpGenTCGA_KIRC_Norm_Trans_Filt75_DEGs <- TCGAanalyze_DEA(mat1 = ExpGenTCGA_KIRC_Norm_Trans_Filt75[,ExpGenTCGA_KIRC_SampleName_DeadStatus],
+                            mat2 = ExpGenTCGA_KIRC_Norm_Trans_Filt75[,ExpGenTCGA_KIRC_SampleName_AliveStatus],
+                            Cond1type = "Dead",
+                            Cond2type = "Alive",
+                            fdr.cut = 0.10,
+                            logFC.cut = 0.4,
+                            method = "glmLRT")
+```
+```{r}
+dim(ExpGenTCGA_KIRC_Norm_Filt75_DEGs)
+```
+Vamos a hacer un subconjunto de nuestro set de Expresión génica con los 238 genes que hemos visto que tienen expresión diferencial tras el análisis.
+
+```{r results='hide'}
+#Obtención de índices de DEGs en ExpGenTCGA_KIRC_Norm_Filt75 (números de fila)
+DEGsNames <- rownames(ExpGenTCGA_KIRC_Norm_Filt75_DEGs)
+IndexDEGs_in_ExpGenTCGA_KIRC_Norm_Filt75 <- c()
+for (i in DEGsNames){
+  IndexDEGs_in_ExpGenTCGA_KIRC_Norm_Filt75 <- c(IndexDEGs_in_ExpGenTCGA_KIRC_Norm_Filt75, which(rownames(ExpGenTCGA_KIRC_Norm_Filt75) %in% i))
+}
+str(IndexDEGs_in_ExpGenTCGA_KIRC_Norm_Filt75)
+```
+```{r results='hide'}
+# Subconjunto de toda la matriz ExpGenTCGA_KIRC_Norm_Filt75 de las filas de los DEGs
+
+ExpGenTCGA_KIRC_Norm_Filt75_238DEG <- ExpGenTCGA_KIRC_Norm_Filt75[IndexDEGs_in_ExpGenTCGA_KIRC_Norm_Filt75,]
+dim(ExpGenTCGA_KIRC_Norm_Filt75_238DEG)
+rownames(ExpGenTCGA_KIRC_Norm_Filt75_238DEG)
+```
+
+```{r results='hide'}
+# Subconjunto de toda la matriz ExpGenTCGA_KIRC_Norm_Trans_Filt75 de las filas de los DEGs
+
+ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG <- ExpGenTCGA_KIRC_Norm_Trans_Filt75[IndexDEGs_in_ExpGenTCGA_KIRC_Norm_Filt75,]
+dim(ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG)
+```
+
+# Construcción del modelo
+
+## Instalación de paquetes
+
+```{r results='hide'}
+library(keras)
+install_keras()
+```
+## Introducción al aprendizaje supervisado
+
+El aprendizaje supervisado consiste en "mapear" unos datos de entrada a unas etiquetas *targets* (también conocidas como anotaciones), dados un conjunto de ejemplos anotados por humanos. Casi todas las aplicaciones de Deep Learning actuales pertenecen a esta categoría. Por lo que, necesitaremos unas etiquetas (*Labels*) para nuestros datos, en nuestro caso tomaremos la variable ```vital_status```.
+
+## Preparación datos, conjuntos de test y train y etiquetas
+
+Vamos a cambiar el array y vamos a poner las muestras como filas y las filas como muestras. Vamos a realizar la prueba del modelo de Deep Learning con dos tipos de datos:
+
+* ```ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed```: Los datos de Expresion Génica de KIRC, normalizados, transformados, con filtrado de genes al 75% y con los 238 genes más diferencialmente expresados. Número de muestras = 606, número de genes = 238. 
+* ```ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed```: Los datos de Expresion Génica de KIRC, normalizados, transformados y con filtrado de genes al 75%. Número de muestras = 606, número de genes = 4897.
+
+```{r}
+ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed <- t(ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG)
+ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed <- t(ExpGenTCGA_KIRC_Norm_Trans_Filt75)
+```
+
+```{r}
+# Creación set train y test para ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed
+
+set.seed(231)
+ExpGenTCGA_KIRC_Index_Training <- sample(1:nrow(ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed), size = 0.80 * nrow(ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed))
+ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed_Test <- ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed[-ExpGenTCGA_KIRC_Index_Training,]
+ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed_Train <- ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed[ExpGenTCGA_KIRC_Index_Training,]
+
+# Creación set train y test para ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed
+
+ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Test <- ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed[-ExpGenTCGA_KIRC_Index_Training,]
+ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Train <- ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed[ExpGenTCGA_KIRC_Index_Training,]
+```
+
+```{r}
+# Obtener etiquetas de cada set para ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed
+
+ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Test_Labels <- ExpGenTCGA_KIRC_RawData$vital_status[-ExpGenTCGA_KIRC_Index_Training]
+ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Train_Labels <- ExpGenTCGA_KIRC_RawData$vital_status[ExpGenTCGA_KIRC_Index_Training]
+
+
+ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Test_Labels_FactorNumb <- as.integer(factor(ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Test_Labels))
+ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Test_Labels_FactorNumb[ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Test_Labels_FactorNumb==2] <- 0
+
+
+ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Test_Labels_FactorNumb <- as.integer(factor(ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Test_Labels))
+ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Test_Labels_FactorNumb[ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Test_Labels_FactorNumb==2] <- 0
+
+ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Train_Labels_FactorNumb <- as.integer(factor(ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Train_Labels))
+ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Train_Labels_FactorNumb[ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Train_Labels_FactorNumb==2] <- 0
+
+
+# Dado que las muestras son las mismas en ambas muestras, porque coinciden no hace falta obtener las etiquetas para cada set
+
+```
+
+## Creación del modelo
+
+### Modelo 1
+
+```{r}
+# Definición del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG <- keras_model_sequential() %>%
+  layer_dense(units = 16, activation = "relu", input_shape = c(238)) %>%
+  layer_dense(units = 16, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+```
+
+```{r}
+summary(Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG)
+```
+
+
+```{r}
+# Compilación del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG  %>% compile(
+  optimizer = "rmsprop",
+  loss = "binary_crossentropy",
+  metrics = c("accuracy")
+)
+```
+
+```{r}
+# Entrenamiento del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+history <- Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG %>% fit(ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed_Train, ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Train_Labels_FactorNumb, epochs = 32, batch_size = 30, 
+                                                                  validation_split = 0.2)
+```
+```{r}
+plot(history)
+```
+
+
+```{r}
+# Evaluación del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+Results_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG <- Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG %>% evaluate(ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed_Test, ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Test_Labels_FactorNumb)
+Results_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+```
+
+# Buscando el overfitting del modelo
+
+Crear un modelo que se sobreajuste es bastante fácil:
+
+1. Añadir capas
+2. Hacer las capas más grandes
+3. Entrenar para más iteraciones
+
+
+## Modelo 2
+
+```{r}
+# Definición del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG <- keras_model_sequential() %>%
+  layer_dense(units = 200, activation = "relu", input_shape = c(238)) %>%
+  layer_dense(units = 100, activation = "relu") %>%
+  layer_dense(units = 50, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+```
+
+```{r}
+summary(Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG)
+```
+
+
+```{r}
+# Compilación del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG  %>% compile(
+  optimizer = "rmsprop",
+  loss = "binary_crossentropy",
+  metrics = c("accuracy")
+)
+```
+
+```{r}
+# Entrenamiento del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+history <- Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG %>% fit(ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed_Train, ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Train_Labels_FactorNumb, epochs = 100, batch_size = 30, 
+                                                                  validation_split = 0.2)
+```
+
+```{r}
+plot(history)
+```
+
+```{r}
+# Evaluación del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+Results_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG <- Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG %>% evaluate(ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed_Test, ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Test_Labels_FactorNumb)
+Results_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+```
+
+## Modelo 3
+
+```{r}
+# Definición del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG <- keras_model_sequential() %>%
+  layer_dense(units = 400, activation = "relu", input_shape = c(238)) %>%
+  layer_dense(units = 200, activation = "relu") %>%
+  layer_dense(units = 100, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+```
+
+```{r}
+summary(Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG)
+```
+
+```{r}
+# Compilación del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG  %>% compile(
+  optimizer = "rmsprop",
+  loss = "binary_crossentropy",
+  metrics = c("accuracy")
+)
+```
+
+```{r}
+# Entrenamiento del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+history <- Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG %>% fit(ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed_Train, ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Train_Labels_FactorNumb, epochs = 100, batch_size = 30, 
+                                                                  validation_split = 0.2)
+```
+
+```{r}
+plot(history)
+```
+
+```{r}
+# Evaluación del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+Results_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG <- Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG %>% evaluate(ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed_Test, ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Test_Labels_FactorNumb)
+Results_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+```
+
+## Modelo 4
+
+```{r}
+# Definición del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG <- keras_model_sequential() %>%
+  layer_dense(units = 400, activation = "relu", input_shape = c(238)) %>%
+  layer_dense(units = 200, activation = "relu") %>%
+  layer_dense(units = 100, activation = "relu") %>%
+  layer_dense(units = 100, activation = "relu") %>%
+  layer_dense(units = 100, activation = "relu") %>%
+  layer_dense(units = 100, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+```
+
+```{r}
+summary(Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG)
+```
+
+```{r}
+# Compilación del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG  %>% compile(
+  optimizer = "rmsprop",
+  loss = "binary_crossentropy",
+  metrics = c("accuracy")
+)
+```
+
+```{r}
+# Entrenamiento del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+history <- Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG %>% fit(ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed_Train, ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Train_Labels_FactorNumb, epochs = 100, batch_size = 30, 
+                                                                  validation_split = 0.2)
+```
+
+```{r}
+plot(history)
+```
+
+```{r}
+# Evaluación del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+Results_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG <- Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG %>% evaluate(ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed_Test, ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Test_Labels_FactorNumb)
+Results_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+```
+
+## Modelo 5
+
+```{r}
+# Definición del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG <- keras_model_sequential() %>%
+  layer_dense(units = 200, activation = "relu", input_shape = c(238)) %>%
+  layer_dense(units = 100, activation = "relu") %>%
+  layer_dense(units = 50, activation = "relu") %>%
+  layer_dense(units = 20, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+```
+
+```{r}
+summary(Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG)
+```
+
+```{r}
+# Compilación del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG  %>% compile(
+  optimizer = "rmsprop",
+  loss = "binary_crossentropy",
+  metrics = c("accuracy")
+)
+```
+
+```{r}
+# Entrenamiento del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+history <- Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG %>% fit(ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed_Train, ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Train_Labels_FactorNumb, epochs = 100, batch_size = 30, 
+                                                                  validation_split = 0.2)
+```
+
+```{r}
+plot(history)
+```
+
+```{r}
+# Evaluación del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+Results_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG <- Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG %>% evaluate(ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed_Test, ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Test_Labels_FactorNumb)
+Results_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+```
+
+## Modelo 6
+
+```{r}
+# Definición del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG <- keras_model_sequential() %>%
+  layer_dense(units = 200, activation = "relu", input_shape = c(238)) %>%
+  layer_dense(units = 100, activation = "relu") %>%
+  layer_dense(units = 50, activation = "relu") %>%
+  layer_dense(units = 20, activation = "relu") %>%
+  layer_dense(units = 10, activation = "relu") %>%
+  layer_dense(units = 5, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+```
+
+```{r}
+summary(Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG)
+```
+
+```{r}
+# Compilación del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG  %>% compile(
+  optimizer = "rmsprop",
+  loss = "binary_crossentropy",
+  metrics = c("accuracy")
+)
+```
+
+```{r}
+# Entrenamiento del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+history <- Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG %>% fit(ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed_Train, ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Train_Labels_FactorNumb, epochs = 100, batch_size = 30, 
+                                                                  validation_split = 0.2)
+```
+
+```{r}
+plot(history)
+```
+
+```{r}
+# Evaluación del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+Results_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG <- Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG %>% evaluate(ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed_Test, ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Test_Labels_FactorNumb)
+Results_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+```
+
+## Modelo 7
+
+```{r}
+# Definición del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG <- keras_model_sequential() %>%
+  layer_dense(units = 500, activation = "relu", input_shape = c(238)) %>%
+  layer_dense(units = 300, activation = "relu") %>%
+  layer_dense(units = 100, activation = "relu") %>%
+  layer_dense(units = 50, activation = "relu") %>%
+  layer_dense(units = 1, activation = "sigmoid")
+```
+
+```{r}
+summary(Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG)
+```
+
+```{r}
+# Compilación del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG  %>% compile(
+  optimizer = "rmsprop",
+  loss = "binary_crossentropy",
+  metrics = c("accuracy")
+)
+```
+
+```{r}
+# Entrenamiento del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+history <- Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG %>% fit(ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed_Train, ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Train_Labels_FactorNumb, epochs = 100, batch_size = 30, 
+                                                                  validation_split = 0.2)
+```
+
+```{r}
+plot(history)
+```
+
+```{r}
+# Evaluación del modelo ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+
+Results_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG <- Model_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG %>% evaluate(ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG_Transposed_Test, ExpGenTCGA_KIRC_Norm_Trans_Filt75_Transposed_Test_Labels_FactorNumb)
+Results_ExpGenTCGA_KIRC_Norm_Trans_Filt75_238DEG
+```
+
+
+# tfruns: Track and Visualize Training Runs
+
+Una mejor manera de comparar los entrenamientos es con el paquete tfruns.
+
+* Hace un seguimiento de los hiperparámetros, métricas, resultados y código fuente de cada entrenamiento.
+* Compara hiperparámetros y métricas de todos los runs y encuentra el mejor modelo.
+* Genera automáticamente informes para visualizar indivualmente los entrenamientos o comparación entre runs.
+* No se necesita cambiar el código fuente.
+
+## Instalación
+
+```{r eval=FALSE, include=TRUE}
+install.packages("tfruns")
+install.packages("tfestimators")
+```
+## Entrenamiento
+
+En las siguientes secciones se describirán las capacidades de ```tfruns```. Nuestro script de entrenamiento ```script.R``` entrena un modelo Keras para clasificar pacientes entre vivos y muertos a partir de datos de Expresión génica.
+
+Para entrenar la red con **tfruns** utiliza la función ```training_run()``` para ejecutar el script de R.
+
+```{r eval=FALSE, include=TRUE}
+library(tfestimators)
+library(tfruns)
+training_run("script.R")
+```
+
+Cuando el entrenamiento se haya completado, un resumen de la ejecución aparecerá en pantalla si estás en una sesión interactiva de R.
+
+
+# Enlaces de interés
+
+https://riuma.uma.es/xmlui/bitstream/handle/10630/13942/103060005.pdf;jsessionid=CBBC364B3A641B87C959E0E5C42F99BA?sequence=1
+https://tensorflow.rstudio.com/tools/tfruns/overview/
+https://tensorflow.rstudio.com/tools/tensorboard/tensorboard/
+
+
+
+
+
+
+
+
+
+
